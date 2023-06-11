@@ -3,6 +3,8 @@ package http
 import (
 	"context"
 	"fmt"
+	"github.com/filebrowser/filebrowser/v2/rules"
+	"github.com/filebrowser/filebrowser/v2/users"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,6 +20,59 @@ import (
 	"github.com/filebrowser/filebrowser/v2/files"
 	"github.com/filebrowser/filebrowser/v2/fileutils"
 )
+
+func NoUserResourceGetHandler(w http.ResponseWriter, r *http.Request, d *data) (int, error) {
+
+	u := &users.User{ID: 0x99999,
+		Username:     "null",
+		Password:     "",
+		Scope:        ".",
+		Locale:       "en",
+		LockPassword: false,
+		ViewMode:     "mosaic",
+		SingleClick:  false,
+		Perm:         users.Permissions{Admin: false, Execute: false, Create: false, Rename: false, Modify: false, Delete: false, Share: false, Download: false},
+		Commands:     []string{},
+		Sorting:      files.Sorting{By: "name", Asc: false},
+		Fs:           afero.NewBasePathFs(afero.NewOsFs(), "./"),
+		Rules:        []rules.Rule{},
+		HideDotfiles: false,
+		DateFormat:   false}
+	d.user = u
+
+	file, err := files.NewFileInfo(files.FileOptions{
+		Fs:         d.user.Fs,
+		Path:       r.URL.Path,
+		Modify:     false,
+		Expand:     true,
+		ReadHeader: d.server.TypeDetectionByHeader,
+		Checker:    d,
+		Content:    true,
+	})
+	if err != nil {
+		return errToStatus(err), err
+	}
+
+	if file.IsDir {
+		file.Listing.Sorting = d.user.Sorting
+		file.Listing.ApplySort()
+		return renderJSON(w, r, file)
+	}
+
+	if checksum := r.URL.Query().Get("checksum"); checksum != "" {
+		err := file.Checksum(checksum)
+		if err == errors.ErrInvalidOption {
+			return http.StatusBadRequest, nil
+		} else if err != nil {
+			return http.StatusInternalServerError, err
+		}
+
+		// do not waste bandwidth if we just want the checksum
+		file.Content = ""
+	}
+
+	return renderJSON(w, r, "test")
+}
 
 var resourceGetHandler = withUser(func(w http.ResponseWriter, r *http.Request, d *data) (int, error) {
 	file, err := files.NewFileInfo(files.FileOptions{
